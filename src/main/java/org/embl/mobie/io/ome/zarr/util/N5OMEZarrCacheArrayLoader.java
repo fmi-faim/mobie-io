@@ -13,6 +13,7 @@ import org.janelia.saalfeldlab.n5.N5Reader;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Map;
 
 @Slf4j
 public class N5OMEZarrCacheArrayLoader<A> implements SimpleCacheArrayLoader<A> {
@@ -30,7 +31,8 @@ public class N5OMEZarrCacheArrayLoader<A> implements SimpleCacheArrayLoader<A> {
         this.channel = channel;
         this.timepoint = timepoint;
         this.attributes = attributes;
-        this.zarrArrayCreator = new ZarrArrayCreator<>(grid, attributes.getDataType(), zarrAxes);
+        final DataType dataType = attributes.getDataType();
+        this.zarrArrayCreator = new ZarrArrayCreator<>(grid, dataType, zarrAxes);
         this.zarrAxes = zarrAxes;
     }
 
@@ -38,7 +40,7 @@ public class N5OMEZarrCacheArrayLoader<A> implements SimpleCacheArrayLoader<A> {
     public A loadArray(final long[] gridPosition) throws IOException {
         DataBlock<?> block = null;
 
-        long[] dataBlockIndices = toDataBlockIndices(gridPosition);
+        long[] dataBlockIndices = toZarrChunkIndices(gridPosition);
 
         long start = 0;
         if (N5OMEZarrImageLoader.logging)
@@ -64,61 +66,27 @@ public class N5OMEZarrCacheArrayLoader<A> implements SimpleCacheArrayLoader<A> {
         }
 
         if (block == null) {
-            return (A) zarrArrayCreator.createEmptyArray(gridPosition);
+            return (A) zarrArrayCreator.createEmptyArray( gridPosition );
         } else {
             return zarrArrayCreator.createArray(block, gridPosition);
         }
     }
 
-    private long[] toDataBlockIndices(long[] gridPosition) {
-        long[] dataBlockIndices = gridPosition;
+    private long[] toZarrChunkIndices( long[] gridPosition) {
 
-        if (zarrAxes.is2D()) {
-            dataBlockIndices = new long[2];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 2);
-        }
+        long[] chunkInZarr = new long[ zarrAxes.getNumDimension() ];
 
-        if (zarrAxes.is4DWithTimepointsAndChannels()) {
-            dataBlockIndices = new long[4];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 2);
-            dataBlockIndices[2] = channel;
-            dataBlockIndices[3] = timepoint;
-        }
+        // fill in the spatial dimensions
+        final Map< Integer, Integer > spatialToZarr = zarrAxes.spatialToZarr();
+        for ( Map.Entry< Integer, Integer > entry : spatialToZarr.entrySet() )
+            chunkInZarr[ entry.getValue() ] = gridPosition[ entry.getKey() ];
 
-        if (zarrAxes.is5D()) {
-            dataBlockIndices = new long[5];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 3);
-            dataBlockIndices[3] = channel;
-            dataBlockIndices[4] = timepoint;
-        }
+        if ( zarrAxes.hasChannels() )
+            chunkInZarr[ zarrAxes.channelIndex() ] = channel;
 
-        if (zarrAxes.is4DWithChannels()) {
-            dataBlockIndices = new long[4];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 3);
-            dataBlockIndices[3] = channel;
-        }
+        if ( zarrAxes.hasTimepoints() )
+            chunkInZarr[ zarrAxes.timeIndex() ] = timepoint;
 
-        if (zarrAxes.is3DWithTimepoints()) {
-            dataBlockIndices = new long[3];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 2);
-            dataBlockIndices[2] = timepoint;
-        }
-
-        if (zarrAxes.is3DWithChannels()) {
-            dataBlockIndices = new long[3];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 2);
-            dataBlockIndices[2] = channel;
-        }
-
-        if (zarrAxes.is4DWithTimepoints()) {
-            dataBlockIndices = new long[4];
-            System.arraycopy(gridPosition, 0, dataBlockIndices, 0, 3);
-            dataBlockIndices[3] = timepoint;
-        }
-
-        if (dataBlockIndices == null)
-            throw new RuntimeException("Could not determine the data block to be loaded.");
-
-        return dataBlockIndices;
+        return chunkInZarr;
     }
 }
